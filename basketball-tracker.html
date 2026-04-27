@@ -126,6 +126,13 @@
   .player-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
   .player-name { font-size: 13px; color: #e0e0e0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .player-actions { display: none; gap: 4px; }
+  .drag-handle {
+    cursor: grab; color: #555; font-size: 14px; line-height: 1; user-select: none; flex-shrink: 0;
+    transition: color 0.2s;
+  }
+  .drag-handle:hover { color: #e94560; }
+  .player-item[draggable="true"] { cursor: grab; }
+  .player-item[draggable="true"]:active { cursor: grabbing; }
   .player-item:hover .player-actions { display: flex; }
   .btn-mini {
     width: 20px; height: 20px; border-radius: 4px; border: none;
@@ -743,8 +750,7 @@ const EMBEDDED_DATA = null;
 // 数据结构
 // ============================
 let state = {
-  sessions: [],          // [{id, name}]
-  players: [],           // [{id, name, avatar}]  全局球员池
+  sessions: [],          // [{id, name, players: [{id, name, avatar}]}]  每个场次有自己的球员列表
   shots: {},             // {sessionId: {playerId: [{x,y,made}]}}
   currentSession: null,
   currentPlayer: 'all',  // 'all' 或 playerId
@@ -762,21 +768,77 @@ let state = {
 let fileHandle = null;           // File System Access API 文件句柄
 const DATA_FILE_NAME = 'basketball-tracker-data.json';
 
+// IndexedDB 用于持久化 fileHandle（File System Access API 的 handle 可序列化存储）
+const IDB_NAME = 'bball_tracker_db';
+const IDB_STORE = 'handles';
+const IDB_KEY = 'data_file_handle';
+
+function openIDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function saveFileHandle() {
+  if (!fileHandle) return;
+  try {
+    const db = await openIDB();
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(fileHandle, IDB_KEY);
+  } catch (e) { /* 忽略 */ }
+}
+
+async function restoreFileHandle() {
+  try {
+    const db = await openIDB();
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    return new Promise((resolve) => {
+      const req = tx.objectStore(IDB_STORE).get(IDB_KEY);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+  } catch (e) { return null; }
+}
+
 // 检测浏览器是否支持 File System Access API
 const supportsFileSystemAccess = ('showOpenFilePicker' in window);
 
 function getPlainData() {
   return JSON.stringify({
     sessions: state.sessions,
-    players: state.players,
     shots: state.shots,
   }, null, 2);
 }
 
 function applyData(d) {
-  state.sessions = d.sessions || [];
-  state.players = d.players || [];
+  // 兼容旧数据格式：旧格式有全局 players 字段，需要迁移到每个场次
+  if (d.sessions) {
+    const hasGlobalPlayers = Array.isArray(d.players);
+    state.sessions = d.sessions.map(s => {
+      if (s.players) return s; // 新格式，每个场次已有 players
+      // 旧格式迁移：把全局 players 复制到每个场次
+      if (hasGlobalPlayers) {
+        return { ...s, players: JSON.parse(JSON.stringify(d.players)) };
+      }
+      // 都没有 players 字段，初始化空数组
+      return { ...s, players: [] };
+    });
+  }
   state.shots = d.shots || {};
+}
+
+// 获取当前场次的球员列表
+function currentPlayers() {
+  const s = state.sessions.find(s => s.id === state.currentSession);
+  return s ? (s.players || []) : [];
+}
+
+// 根据 playerId 在当前场次找到球员
+function findPlayer(playerId) {
+  return currentPlayers().find(p => p.id === playerId);
 }
 
 // --- File System Access API（Chrome/Edge）---
@@ -789,7 +851,19 @@ async function openDataFile() {
     });
     fileHandle = handle;
     await readFromFile();
+    await saveFileHandle();
+    // 重置当前选中状态
+    state.currentPlayer = 'all';
+    state.addingMode = null;
+    state.pendingShots = [];
+    document.getElementById('preview-layer').innerHTML = '';
+    // 设置默认场次
+    if (state.sessions.length > 0) {
+      state.currentSession = state.sessions[0].id;
+    }
     updateFileUI();
+    render();
+    updateAddingModeUI();
     showToast('数据文件已加载', 'success');
   } catch (e) {
     if (e.name !== 'AbortError') showToast('打开文件失败', 'error');
@@ -804,6 +878,7 @@ async function createDataFile() {
       types: [{ description: 'JSON 数据文件', accept: { 'application/json': ['.json'] } }],
     });
     await writeToFile();
+    await saveFileHandle();
     updateFileUI();
     showToast('数据文件已创建', 'success');
   } catch (e) {
@@ -851,7 +926,17 @@ function importData(event) {
       const d = JSON.parse(e.target.result);
       applyData(d);
       saveData();
+      // 重置当前选中状态
+      state.currentPlayer = 'all';
+      state.addingMode = null;
+      state.pendingShots = [];
+      document.getElementById('preview-layer').innerHTML = '';
+      // 设置默认场次
+      if (state.sessions.length > 0) {
+        state.currentSession = state.sessions[0].id;
+      }
       render();
+      updateAddingModeUI();
       showToast('数据已导入', 'success');
     } catch (err) {
       showToast('文件格式无效', 'error');
@@ -867,7 +952,6 @@ function saveData() {
   // 始终同步到 localStorage 作为缓存
   localStorage.setItem('bball_tracker', JSON.stringify({
     sessions: state.sessions,
-    players: state.players,
     shots: state.shots,
   }));
   // 如果有文件句柄，异步写入文件
@@ -893,7 +977,7 @@ function loadData() {
   // 默认场次
   if (state.sessions.length === 0) {
     const id = genId();
-    state.sessions.push({ id, name: '2026-04-22 训练赛' });
+    state.sessions.push({ id, name: '2026-04-22 训练赛', players: [] });
     state.currentSession = id;
     saveData();
   } else {
@@ -974,7 +1058,7 @@ document.addEventListener('DOMContentLoaded', function() {
         enterEditMode();
         showToast('已进入编辑模式', 'success');
         longPressTimer = null;
-      }, 5000);
+      }, 2000);
     });
 
     el.addEventListener('pointerup', function() { clearTimeout(longPressTimer); longPressTimer = null; });
@@ -1102,19 +1186,26 @@ function renameSession(id, oldName) {
 // ============================
 function renderPlayers() {
   const list = document.getElementById('playerList');
+  const players = currentPlayers();
   let html = '';
 
   // "全部球员"选项
   html += `<div class="player-item all-players ${state.currentPlayer === 'all' ? 'active' : ''}"
     onclick="selectPlayer('all')">
     <div class="player-avatar" style="font-size:18px;">👥</div>
-    <span class="player-name">所有球员</span>
+    <span class="player-name">全队</span>
   </div>`;
 
-  // 获取当前场次的球员（有投篮记录 或 全局球员）
-  state.players.forEach(p => {
+  // 当前场次的球员
+  players.forEach((p, idx) => {
     html += `<div class="player-item ${state.currentPlayer === p.id ? 'active' : ''}"
+      draggable="${state.editMode ? 'true' : 'false'}"
+      data-player-idx="${idx}"
+      ondragstart="onPlayerDragStart(event, ${idx})"
+      ondragover="onPlayerDragOver(event)"
+      ondrop="onPlayerDrop(event, ${idx})"
       onclick="selectPlayer('${p.id}')">
+      ${state.editMode ? '<span class="drag-handle" title="拖拽排序">⠿</span>' : ''}
       <div class="player-avatar">${avatarHtml(p)}</div>
       <span class="player-name">${escapeHtml(p.name)}</span>
       <div class="player-actions">
@@ -1124,11 +1215,45 @@ function renderPlayers() {
     </div>`;
   });
 
-  if (state.players.length === 0) {
+  if (players.length === 0) {
     html += `<div class="empty-hint">暂无球员<br><small>${state.editMode ? '点击右上角 ＋ 添加' : '长按此处进入编辑模式'}</small></div>`;
   }
 
   list.innerHTML = html;
+}
+
+// --- 球员拖拽排序 ---
+let dragPlayerIdx = null;
+
+function onPlayerDragStart(e, idx) {
+  dragPlayerIdx = idx;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', idx);
+  e.currentTarget.style.opacity = '0.4';
+}
+
+function onPlayerDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+}
+
+function onPlayerDrop(e, targetIdx) {
+  e.preventDefault();
+  if (dragPlayerIdx === null || dragPlayerIdx === targetIdx) return;
+  const players = currentPlayers();
+  const [moved] = players.splice(dragPlayerIdx, 1);
+  players.splice(targetIdx, 0, moved);
+  // players 是引用，直接修改了 session.players
+  saveData();
+  renderPlayers();
+  renderShots();
+  renderStats();
+  dragPlayerIdx = null;
+}
+
+function onPlayerDragEnd(e) {
+  e.currentTarget.style.opacity = '';
+  dragPlayerIdx = null;
 }
 
 function avatarHtml(p) {
@@ -1157,7 +1282,7 @@ function openAddPlayer() {
 }
 
 function openEditPlayer(id) {
-  const p = state.players.find(p => p.id === id);
+  const p = findPlayer(id);
   if (!p) return;
   state.editingPlayerId = id;
   state.tempAvatar = p.avatar || null;
@@ -1179,8 +1304,11 @@ function savePlayer() {
   const name = document.getElementById('playerNameInput').value.trim();
   if (!name) { showToast('请输入球员姓名', 'error'); return; }
 
+  const session = state.sessions.find(s => s.id === state.currentSession);
+  if (!session) return;
+
   if (state.editingPlayerId) {
-    const p = state.players.find(p => p.id === state.editingPlayerId);
+    const p = (session.players || []).find(p => p.id === state.editingPlayerId);
     if (p) {
       p.name = name;
       if (state.tempAvatar !== undefined) p.avatar = state.tempAvatar;
@@ -1188,7 +1316,8 @@ function savePlayer() {
     showToast('球员信息已更新', 'success');
   } else {
     const id = genId();
-    state.players.push({ id, name, avatar: state.tempAvatar || null });
+    if (!session.players) session.players = [];
+    session.players.push({ id, name, avatar: state.tempAvatar || null });
     showToast('球员已添加', 'success');
   }
 
@@ -1211,17 +1340,20 @@ function handleAvatarUpload(event) {
 }
 
 function confirmDeletePlayer(id) {
-  const p = state.players.find(p => p.id === id);
+  const p = findPlayer(id);
   if (!p) return;
   document.getElementById('confirmText').innerHTML =
-    `确定要删除球员 <strong>${escapeHtml(p.name)}</strong> 吗？<br><small style="color:#e94560;">该球员在所有场次中的投篮记录也将一并删除。</small>`;
+    `确定要删除球员 <strong>${escapeHtml(p.name)}</strong> 吗？<br><small style="color:#e94560;">该球员在当前场次中的投篮记录也将一并删除。</small>`;
   state.confirmCallback = () => {
-    // 删除球员
-    state.players = state.players.filter(p => p.id !== id);
-    // 删除所有场次中该球员的记录
-    Object.keys(state.shots).forEach(sid => {
-      if (state.shots[sid]) delete state.shots[sid][id];
-    });
+    // 从当前场次删除球员
+    const session = state.sessions.find(s => s.id === state.currentSession);
+    if (session && session.players) {
+      session.players = session.players.filter(p => p.id !== id);
+    }
+    // 删除当前场次中该球员的投篮记录
+    if (state.shots[state.currentSession]) {
+      delete state.shots[state.currentSession][id];
+    }
     if (state.currentPlayer === id) state.currentPlayer = 'all';
     saveData();
     render();
@@ -1244,8 +1376,7 @@ function executeConfirm() {
 // 投篮模式控制
 // ============================
 function setShotMode(mode) {
-  if (!state.editMode) return;
-  if (state.players.length === 0) { showToast('请先添加球员', 'error'); return; }
+  if (currentPlayers().length === 0) { showToast('请先添加球员', 'error'); return; }
   if (state.currentPlayer === 'all') { showToast('请先选择一名球员', 'error'); return; }
 
   if (state.addingMode === mode) {
@@ -1333,7 +1464,7 @@ document.getElementById('court-svg').addEventListener('click', function(e) {
   const svgP = pt.matrixTransform(svg.getScreenCTM().inverse());
 
   // 检查是否在球场范围内
-  if (svgP.x < 10 || svgP.x > 550 || svgP.y < 10 || svgP.y > 930) return;
+  if (svgP.x < 10 || svgP.x > 930 || svgP.y < 10 || svgP.y > 550) return;
 
   const shot = { x: svgP.x, y: svgP.y, made: state.addingMode === 'made' };
   state.pendingShots.push(shot);
@@ -1356,14 +1487,12 @@ function renderShots() {
   const sessionShots = state.shots[state.currentSession] || {};
 
   if (state.currentPlayer === 'all') {
-    // 显示所有球员（不同颜色）
-    const colors = ['#4CAF50','#2196F3','#FF9800','#9C27B0','#00BCD4','#FF5722','#FFEB3B','#E91E63'];
-    state.players.forEach((p, idx) => {
+    // 显示所有球员
+    currentPlayers().forEach((p, idx) => {
       const shots = sessionShots[p.id] || [];
-      const color = colors[idx % colors.length];
       shots.forEach((s, i) => {
-        // 未投进的投篮点统一用红色，投进的用球员对应颜色
-        const shotColor = s.made ? color : '#e94560';
+        // 投进统一绿色，未投进统一红色
+        const shotColor = s.made ? '#4CAF50' : '#e94560';
         drawShotMark(layer, s, false, shotColor, p.id, i);
       });
     });
@@ -1515,13 +1644,14 @@ function renderStats() {
   const container = document.getElementById('statsContent');
   if (!state.currentSession) { container.innerHTML = ''; return; }
   const sessionShots = state.shots[state.currentSession] || {};
+  const players = currentPlayers();
 
   let html = '';
 
   if (state.currentPlayer === 'all') {
     // 全部球员汇总
     let totalAttempts = 0, totalMade = 0;
-    state.players.forEach(p => {
+    players.forEach(p => {
       const shots = sessionShots[p.id] || [];
       totalAttempts += shots.length;
       totalMade += shots.filter(s => s.made).length;
@@ -1536,27 +1666,34 @@ function renderStats() {
       <div class="rate-bar"><div class="rate-fill" style="width:${totalRate}%"></div></div>
     </div>`;
 
-    // 各球员小卡片
-    if (state.players.length > 0) {
-      html += `<div class="stats-all-section"><div class="stats-all-title">各球员数据</div>`;
-      state.players.forEach(p => {
+    // 各球员按命中率排名
+    if (players.length > 0) {
+      const playerStats = players.map(p => {
         const shots = sessionShots[p.id] || [];
         const attempts = shots.length;
         const made = shots.filter(s => s.made).length;
-        const rate = attempts > 0 ? (made / attempts * 100).toFixed(1) : '-';
+        const rate = attempts > 0 ? made / attempts : -1; // -1 表示无数据排最后
+        return { ...p, attempts, made, rate };
+      }).sort((a, b) => b.rate - a.rate); // 命中率由高到低
+
+      html += `<div class="stats-all-section"><div class="stats-all-title">🏆 球员命中率排名</div>`;
+      playerStats.forEach((p, rank) => {
+        const rateStr = p.attempts > 0 ? (p.rate * 100).toFixed(1) : '-';
+        const rankIcon = rank === 0 ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : `<span style="color:#555;font-size:11px;">${rank + 1}</span>`;
         html += `<div class="player-stat-row">
+          <div style="width:24px;text-align:center;flex-shrink:0;">${rankIcon}</div>
           <div class="player-stat-avatar">${avatarHtml(p)}</div>
           <div class="player-stat-info">
             <div class="player-stat-name">${escapeHtml(p.name)}</div>
-            <div class="player-stat-nums">${attempts}投 ${made}中</div>
+            <div class="player-stat-nums">${p.attempts}投 ${p.made}中</div>
           </div>
-          <div class="player-stat-rate">${rate}${rate !== '-' ? '%' : ''}</div>
+          <div class="player-stat-rate">${rateStr}${rateStr !== '-' ? '%' : ''}</div>
         </div>`;
       });
       html += `</div>`;
     }
   } else {
-    const p = state.players.find(p => p.id === state.currentPlayer);
+    const p = findPlayer(state.currentPlayer);
     if (p) {
       const shots = sessionShots[p.id] || [];
       const attempts = shots.length;
@@ -1595,7 +1732,7 @@ function renderStats() {
 }
 
 function confirmClearShots(playerId) {
-  const p = state.players.find(p => p.id === playerId);
+  const p = findPlayer(playerId);
   if (!p) return;
   document.getElementById('confirmText').innerHTML =
     `确定要清除 <strong>${escapeHtml(p.name)}</strong> 在本场次的所有投篮记录吗？`;
@@ -1648,9 +1785,28 @@ document.addEventListener('keydown', (e) => {
 // ============================
 // 初始化
 // ============================
-loadData();
-render();
-updateFileUI();
+// 初始化（先恢复文件句柄，再加载和渲染）
+(async function init() {
+  if (supportsFileSystemAccess) {
+    fileHandle = await restoreFileHandle();
+    if (fileHandle) {
+      try {
+        // 尝试读取文件数据
+        await readFromFile();
+      } catch(e) {
+        // 权限不足时保留 handle（下次写操作时再请求权限），但不使用它的数据
+        if (e.name === 'NotAllowedError') {
+          // handle 仍保留，updateFileUI 会显示文件名
+        } else {
+          fileHandle = null;
+        }
+      }
+    }
+  }
+  loadData();
+  render();
+  updateFileUI();
+})();
 </script>
 </body>
 </html>
