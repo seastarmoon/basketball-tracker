@@ -735,6 +735,10 @@
 <div class="toast" id="toast"></div>
 
 <script>
+// 发布时嵌入的数据（发布脚本会自动替换此行）
+const EMBEDDED_DATA = null;
+</script>
+<script>
 // ============================
 // 数据结构
 // ============================
@@ -871,11 +875,18 @@ function saveData() {
 }
 
 function loadData() {
-  // 先从 localStorage 缓存加载（立即可用）
+  // 优先级：localStorage 缓存 > 嵌入数据 > 空数据
   const raw = localStorage.getItem('bball_tracker');
   if (raw) {
     try {
       const d = JSON.parse(raw);
+      applyData(d);
+    } catch(e) {}
+  }
+  // 如果 localStorage 没有数据，尝试从嵌入的发布数据加载
+  if (state.sessions.length === 0 && typeof EMBEDDED_DATA !== 'undefined' && EMBEDDED_DATA) {
+    try {
+      const d = JSON.parse(EMBEDDED_DATA);
       applyData(d);
     } catch(e) {}
   }

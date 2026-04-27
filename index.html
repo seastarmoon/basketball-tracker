@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -18,6 +18,22 @@
   }
   .top-bar h1 { font-size: 20px; color: #fff; display: flex; align-items: center; gap: 8px; }
   .top-bar h1 span { color: #e94560; }
+  .top-bar-right { display: flex; align-items: center; gap: 8px; }
+  .file-status {
+    font-size: 11px; color: #4CAF50; display: flex; align-items: center; gap: 4px;
+    max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .file-status.no-file { color: #888; }
+  .file-status-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: #4CAF50; flex-shrink: 0;
+  }
+  .file-status.no-file .file-status-dot { background: #888; }
+  .btn-file {
+    padding: 4px 10px; border-radius: 6px; border: 1px solid #0f3460;
+    background: transparent; color: #aaa; font-size: 11px; cursor: pointer;
+    white-space: nowrap; transition: all 0.2s;
+  }
+  .btn-file:hover { border-color: #e94560; color: #e94560; }
 
   /* 场次选择器 */
   .session-bar {
@@ -187,6 +203,30 @@
   }
   .pending-count span { color: #e94560; font-weight: bold; }
 
+  /* 编辑模式提示条 */
+  .edit-mode-bar {
+    display: none;
+    padding: 8px 20px;
+    background: linear-gradient(90deg, #e94560, #c73652);
+    color: #fff;
+    font-size: 13px;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
+    letter-spacing: 1px;
+  }
+  .edit-mode-bar.show { display: block; }
+  .edit-mode-bar:hover { background: linear-gradient(90deg, #c73652, #a82d48); }
+
+  /* 查看模式下隐藏编辑元素 */
+  .view-mode .btn-add-session,
+  .view-mode .session-actions,
+  .view-mode .btn-icon,
+  .view-mode .player-actions,
+  .view-mode .shot-toolbar,
+  .view-mode .shot-delete-btn { display: none !important; }
+  .view-mode #court-svg { cursor: default; }
+
   /* 右侧统计面板 */
   .stats-panel {
     width: 220px; min-width: 200px;
@@ -340,7 +380,9 @@
     /* 顶部标题 */
     .top-bar { padding: 8px 12px; }
     .top-bar h1 { font-size: 16px; }
-    .top-bar div { display: none; }
+    .top-bar-right .file-status span:not(.file-status-dot) { display: none; }
+    .btn-file { padding: 3px 8px; font-size: 10px; }
+    .file-status { font-size: 10px; }
 
     /* 场次条 */
     .session-bar { padding: 6px 10px; gap: 8px; }
@@ -434,6 +476,7 @@
 
   /* 小屏手机（<400px）进一步优化 */
   @media (max-width: 400px) {
+    .edit-mode-bar { font-size: 12px; padding: 6px 12px; }
     .top-bar h1 { font-size: 14px; }
     .player-avatar { width: 26px; height: 26px; font-size: 12px; }
     .player-name { max-width: 44px; font-size: 9px; }
@@ -447,8 +490,18 @@
 
 <!-- 顶部标题 -->
 <div class="top-bar">
-  <h1>🏀 <span>篮球</span>投篮点标记系统</h1>
-  <div style="font-size:12px;color:#555;">FIBA标准球场 · 数据可视化</div>
+  <h1>🏀 <span>篮球</span>投篮点标记</h1>
+  <div class="top-bar-right">
+    <div class="file-status no-file" id="fileStatus">
+      <span class="file-status-dot"></span>
+      <span id="fileName">未连接文件</span>
+    </div>
+    <button class="btn-file" id="btnOpenFile" onclick="openDataFile()" title="打开已有的数据文件">📂 打开</button>
+    <button class="btn-file" id="btnNewFile" onclick="createDataFile()" title="创建新的数据文件">➕ 新建</button>
+    <button class="btn-file" id="btnExport" onclick="exportData()" title="导出为 JSON 文件（兼容模式）" style="display:none;">📤 导出</button>
+    <button class="btn-file" id="btnImport" onclick="document.getElementById('importInput').click()" title="导入 JSON 文件（兼容模式）" style="display:none;">📥 导入</button>
+    <input type="file" id="importInput" accept=".json" style="display:none;" onchange="importData(event)">
+  </div>
 </div>
 
 <!-- 场次条 -->
@@ -456,6 +509,11 @@
   <span class="session-label">场次：</span>
   <div class="session-list" id="sessionList"></div>
   <button class="btn-add-session" onclick="openAddSession()">＋ 新建场次</button>
+</div>
+
+<!-- 编辑模式提示条 -->
+<div class="edit-mode-bar" id="editModeBar" onclick="exitEditMode()">
+  ✏️ 编辑模式 — 点击此处返回查看
 </div>
 
 <!-- 主体 -->
@@ -677,6 +735,10 @@
 <div class="toast" id="toast"></div>
 
 <script>
+// 发布时嵌入的数据（发布脚本会自动替换此行）
+const EMBEDDED_DATA = '{"sessions":[{"id":"moc8yuqxveta","name":"2026-04-22 训练赛"}],"players":[{"id":"mogmpphp1umk","name":"球员1","avatar":null},{"id":"mogub65rcw1x","name":"球员2","avatar":null},{"id":"moguba8la0nm","name":"球员3","avatar":null}],"shots":{"moc8yuqxveta":{"mogmpphp1umk":[{"x":329.99530029296875,"y":286.04412841796875,"made":true},{"x":329.99530029296875,"y":286.04412841796875,"made":true},{"x":301.0287780761719,"y":141.21165466308594,"made":true},{"x":288.95941162109375,"y":246.21519470214844,"made":true},{"x":250.33743286132812,"y":377.7713317871094,"made":true},{"x":222.577880859375,"y":420.0141296386719,"made":true}],"mogub65rcw1x":[{"x":266.0276184082031,"y":136.38389587402344,"made":false},{"x":290.1663513183594,"y":255.8706817626953,"made":false},{"x":257.57904052734375,"y":389.8407287597656,"made":false},{"x":226.1986846923828,"y":445.3598327636719,"made":false}],"moguba8la0nm":[{"x":237.06112670898438,"y":178.626708984375,"made":true},{"x":266.0276184082031,"y":254.6637420654297,"made":true},{"x":272.0622863769531,"y":318.63140869140625,"made":true},{"x":239.47499084472656,"y":451.3945007324219,"made":true},{"x":303.4426574707031,"y":187.0752716064453,"made":false},{"x":268.4414978027344,"y":385.0129699707031,"made":false},{"x":214.1293182373047,"y":422.4280090332031,"made":false},{"x":164.64488220214844,"y":503.2928161621094,"made":false}]}}}';
+</script>
+<script>
 // ============================
 // 数据结构
 // ============================
@@ -691,27 +753,141 @@ let state = {
   editingPlayerId: null,
   confirmCallback: null,
   tempAvatar: null,
+  editMode: false,       // true=编辑模式, false=查看模式
 };
 
 // ============================
-// 本地存储
+// 数据文件管理
 // ============================
+let fileHandle = null;           // File System Access API 文件句柄
+const DATA_FILE_NAME = 'basketball-tracker-data.json';
+
+// 检测浏览器是否支持 File System Access API
+const supportsFileSystemAccess = ('showOpenFilePicker' in window);
+
+function getPlainData() {
+  return JSON.stringify({
+    sessions: state.sessions,
+    players: state.players,
+    shots: state.shots,
+  }, null, 2);
+}
+
+function applyData(d) {
+  state.sessions = d.sessions || [];
+  state.players = d.players || [];
+  state.shots = d.shots || {};
+}
+
+// --- File System Access API（Chrome/Edge）---
+
+async function openDataFile() {
+  if (!supportsFileSystemAccess) return;
+  try {
+    const [handle] = await window.showOpenFilePicker({
+      types: [{ description: 'JSON 数据文件', accept: { 'application/json': ['.json'] } }],
+    });
+    fileHandle = handle;
+    await readFromFile();
+    updateFileUI();
+    showToast('数据文件已加载', 'success');
+  } catch (e) {
+    if (e.name !== 'AbortError') showToast('打开文件失败', 'error');
+  }
+}
+
+async function createDataFile() {
+  if (!supportsFileSystemAccess) return;
+  try {
+    fileHandle = await window.showSaveFilePicker({
+      suggestedName: DATA_FILE_NAME,
+      types: [{ description: 'JSON 数据文件', accept: { 'application/json': ['.json'] } }],
+    });
+    await writeToFile();
+    updateFileUI();
+    showToast('数据文件已创建', 'success');
+  } catch (e) {
+    if (e.name !== 'AbortError') showToast('创建文件失败', 'error');
+  }
+}
+
+async function readFromFile() {
+  const file = await fileHandle.getFile();
+  const text = await file.text();
+  const d = JSON.parse(text);
+  applyData(d);
+}
+
+async function writeToFile() {
+  if (!fileHandle) return;
+  try {
+    const writable = await fileHandle.createWritable();
+    await writable.write(getPlainData());
+    await writable.close();
+  } catch (e) {
+    console.warn('写入文件失败:', e);
+  }
+}
+
+// --- 手动导入/导出（Safari/Firefox 回退）---
+
+function exportData() {
+  const blob = new Blob([getPlainData()], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = DATA_FILE_NAME;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('数据已导出', 'success');
+}
+
+function importData(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const d = JSON.parse(e.target.result);
+      applyData(d);
+      saveData();
+      render();
+      showToast('数据已导入', 'success');
+    } catch (err) {
+      showToast('文件格式无效', 'error');
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = ''; // 重置，允许再次选择同一文件
+}
+
+// --- 统一的 saveData / loadData ---
+
 function saveData() {
+  // 始终同步到 localStorage 作为缓存
   localStorage.setItem('bball_tracker', JSON.stringify({
     sessions: state.sessions,
     players: state.players,
     shots: state.shots,
   }));
+  // 如果有文件句柄，异步写入文件
+  writeToFile();
 }
 
 function loadData() {
+  // 优先级：localStorage 缓存 > 嵌入数据 > 空数据
   const raw = localStorage.getItem('bball_tracker');
   if (raw) {
     try {
       const d = JSON.parse(raw);
-      state.sessions = d.sessions || [];
-      state.players = d.players || [];
-      state.shots = d.shots || {};
+      applyData(d);
+    } catch(e) {}
+  }
+  // 如果 localStorage 没有数据，尝试从嵌入的发布数据加载
+  if (state.sessions.length === 0 && typeof EMBEDDED_DATA !== 'undefined' && EMBEDDED_DATA) {
+    try {
+      const d = JSON.parse(EMBEDDED_DATA);
+      applyData(d);
     } catch(e) {}
   }
   // 默认场次
@@ -725,9 +901,87 @@ function loadData() {
   }
 }
 
+// 更新文件状态 UI
+function updateFileUI() {
+  const statusEl = document.getElementById('fileStatus');
+  const nameEl = document.getElementById('fileName');
+  const btnOpen = document.getElementById('btnOpenFile');
+  const btnNew = document.getElementById('btnNewFile');
+  const btnExport = document.getElementById('btnExport');
+  const btnImport = document.getElementById('btnImport');
+
+  if (supportsFileSystemAccess) {
+    btnOpen.style.display = '';
+    btnNew.style.display = '';
+    btnExport.style.display = 'none';
+    btnImport.style.display = 'none';
+    if (fileHandle) {
+      statusEl.className = 'file-status';
+      nameEl.textContent = fileHandle.name;
+    } else {
+      statusEl.className = 'file-status no-file';
+      nameEl.textContent = '未连接文件';
+    }
+  } else {
+    // 不支持 File System Access API，显示导入/导出按钮
+    btnOpen.style.display = 'none';
+    btnNew.style.display = 'none';
+    btnExport.style.display = '';
+    btnImport.style.display = '';
+    statusEl.className = 'file-status no-file';
+    nameEl.textContent = '仅本地存储';
+  }
+}
+
 function genId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2,6);
 }
+
+// ============================
+// 编辑模式控制
+// ============================
+let longPressTimer = null;
+
+function enterEditMode() {
+  state.editMode = true;
+  document.body.classList.remove('view-mode');
+  document.getElementById('editModeBar').classList.add('show');
+  document.querySelector('.main-layout').style.height = 'calc(100vh - 110px - 37px)';
+}
+
+function exitEditMode() {
+  state.editMode = false;
+  cancelPendingShots(true);
+  hideShotDeleteBtn();
+  document.body.classList.add('view-mode');
+  document.getElementById('editModeBar').classList.remove('show');
+  document.querySelector('.main-layout').style.height = '';
+  updateAddingModeUI();
+}
+
+// 长按球员面板或球场进入编辑模式
+document.addEventListener('DOMContentLoaded', function() {
+  ['player-panel', 'court-area'].forEach(function(sel) {
+    const el = document.querySelector('.' + sel);
+    if (!el) return;
+
+    el.addEventListener('pointerdown', function(e) {
+      // 只在查看模式下触发长按
+      if (state.editMode) return;
+      // 不要在按钮上触发
+      if (e.target.closest('button') || e.target.closest('.player-actions') || e.target.closest('.shot-delete-btn')) return;
+      longPressTimer = setTimeout(function() {
+        enterEditMode();
+        showToast('已进入编辑模式', 'success');
+        longPressTimer = null;
+      }, 5000);
+    });
+
+    el.addEventListener('pointerup', function() { clearTimeout(longPressTimer); longPressTimer = null; });
+    el.addEventListener('pointerleave', function() { clearTimeout(longPressTimer); longPressTimer = null; });
+    el.addEventListener('pointercancel', function() { clearTimeout(longPressTimer); longPressTimer = null; });
+  });
+});
 
 // ============================
 // 渲染入口
@@ -737,6 +991,10 @@ function render() {
   renderPlayers();
   renderShots();
   renderStats();
+  // 初始渲染时设置查看模式
+  if (!state.editMode) {
+    document.body.classList.add('view-mode');
+  }
 }
 
 // ============================
@@ -768,6 +1026,7 @@ function switchSession(id) {
 }
 
 function openAddSession() {
+  if (!state.editMode) enterEditMode();
   document.getElementById('sessionNameInput').value = '';
   document.getElementById('sessionModalTitle').textContent = '新建场次';
   document.getElementById('sessionModalSaveBtn').textContent = '创建';
@@ -866,7 +1125,7 @@ function renderPlayers() {
   });
 
   if (state.players.length === 0) {
-    html += `<div class="empty-hint">暂无球员<br><small>点击右上角 ＋ 添加</small></div>`;
+    html += `<div class="empty-hint">暂无球员<br><small>${state.editMode ? '点击右上角 ＋ 添加' : '长按此处进入编辑模式'}</small></div>`;
   }
 
   list.innerHTML = html;
@@ -887,6 +1146,7 @@ function selectPlayer(id) {
 }
 
 function openAddPlayer() {
+  if (!state.editMode) enterEditMode();
   state.editingPlayerId = null;
   state.tempAvatar = null;
   document.getElementById('playerModalTitle').textContent = '添加球员';
@@ -984,6 +1244,7 @@ function executeConfirm() {
 // 投篮模式控制
 // ============================
 function setShotMode(mode) {
+  if (!state.editMode) return;
   if (state.players.length === 0) { showToast('请先添加球员', 'error'); return; }
   if (state.currentPlayer === 'all') { showToast('请先选择一名球员', 'error'); return; }
 
@@ -1056,6 +1317,8 @@ function confirmShots() {
 // SVG 点击处理
 // ============================
 document.getElementById('court-svg').addEventListener('click', function(e) {
+  // 查看模式下不处理球场点击
+  if (!state.editMode) return;
   if (!state.addingMode) {
     // 非添加模式下，点击空白处取消选中投篮点
     if (!e.target.closest('[data-player-id]')) hideShotDeleteBtn();
@@ -1313,8 +1576,8 @@ function renderStats() {
         <div class="rate-bar"><div class="rate-fill" style="width:${rate}%"></div></div>
       </div>`;
 
-      // 删除投篮记录按钮
-      if (attempts > 0) {
+      // 删除投篮记录按钮（仅编辑模式下显示）
+      if (attempts > 0 && state.editMode) {
         html += `<div style="padding:10px 14px;">
           <button onclick="confirmClearShots('${p.id}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid #555;background:transparent;color:#888;font-size:12px;cursor:pointer;" onmouseover="this.style.borderColor='#e94560';this.style.color='#e94560';" onmouseout="this.style.borderColor='#555';this.style.color='#888';">
             🗑 清除该球员本场投篮记录
@@ -1387,6 +1650,7 @@ document.addEventListener('keydown', (e) => {
 // ============================
 loadData();
 render();
+updateFileUI();
 </script>
 </body>
 </html>
