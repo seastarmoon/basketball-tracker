@@ -159,6 +159,10 @@
     transition: all 0.2s; display: flex; align-items: center; gap: 6px;
   }
   .btn-shot-type:hover { border-color: #888; color: #e0e0e0; }
+  /* 投进按钮图标：选中/未选中均为绿色 */
+  .btn-shot-type .icon-made { color: #4CAF50; }
+  /* 未投进按钮图标：未选中时红色 */
+  .btn-shot-type .icon-miss { color: #e94560; }
   .btn-shot-type.active-made { border-color: #4CAF50; background: rgba(76,175,80,0.2); color: #4CAF50; }
   .btn-shot-type.active-miss { border-color: #e94560; background: rgba(233,69,96,0.2); color: #e94560; }
   .btn-confirm-shots {
@@ -594,10 +598,10 @@
     <div class="shot-toolbar">
       <span class="shot-toolbar-label">录入投篮：</span>
       <button class="btn-shot-type" id="btnMade" onclick="setShotMode('made')">
-        ⭕ 投进
+        <span class="icon-made">⭕</span> 投进
       </button>
       <button class="btn-shot-type" id="btnMiss" onclick="setShotMode('miss')">
-        ✕ 未投进
+        <span class="icon-miss">✕</span> 未投进
       </button>
       <span class="pending-count">待保存：<span id="pendingCount">0</span> 个</span>
       <button class="btn-cancel-shots" id="btnCancelShots" onclick="cancelPendingShots()" style="display:none;">取消</button>
