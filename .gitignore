@@ -1,5 +1,8 @@
 # 本地数据文件
 basketball-tracker-data.json
 
+# 本地开发工具
+publish.ps1
+
 # 系统文件
 .workbuddy/
