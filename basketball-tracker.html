@@ -1,0 +1,1384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>篮球投篮点标记系统</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; }
+
+  /* 顶部导航 */
+  .top-bar {
+    background: linear-gradient(135deg, #16213e, #0f3460);
+    padding: 12px 20px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 2px solid #e94560;
+    box-shadow: 0 2px 10px rgba(233,69,96,0.3);
+  }
+  .top-bar h1 { font-size: 20px; color: #fff; display: flex; align-items: center; gap: 8px; }
+  .top-bar h1 span { color: #e94560; }
+
+  /* 场次选择器 */
+  .session-bar {
+    background: #16213e;
+    padding: 10px 20px;
+    display: flex; align-items: center; gap: 12px;
+    border-bottom: 1px solid #0f3460;
+    overflow-x: auto;
+  }
+  .session-label { font-size: 13px; color: #888; white-space: nowrap; }
+  .session-list { display: flex; gap: 8px; flex: 1; overflow-x: auto; }
+  .session-chip {
+    padding: 5px 14px; border-radius: 20px; border: 1px solid #0f3460;
+    background: #0f3460; color: #aaa; font-size: 13px; cursor: pointer;
+    white-space: nowrap; transition: all 0.2s;
+  }
+  .session-chip.active { background: #e94560; border-color: #e94560; color: #fff; }
+  .session-chip:hover:not(.active) { border-color: #e94560; color: #e94560; }
+  .btn-add-session {
+    padding: 5px 14px; border-radius: 20px; border: 1px dashed #e94560;
+    background: transparent; color: #e94560; font-size: 13px; cursor: pointer;
+    white-space: nowrap; transition: all 0.2s;
+  }
+  .btn-add-session:hover { background: rgba(233,69,96,0.1); }
+  /* 场次编辑/删除按钮 */
+  .session-actions { display: flex; gap: 4px; margin-left: -2px; }
+  .session-actions button {
+    width: 26px; height: 26px; border-radius: 50%; border: none;
+    background: transparent; color: #888; font-size: 13px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s; padding: 0; line-height: 1;
+  }
+  .session-actions .btn-edit-session:hover { color: #4fc3f7; background: rgba(79,195,247,0.15); }
+  .session-actions .btn-del-session:hover { color: #e94560; background: rgba(233,69,96,0.15); }
+  /* 投篮点选中态 */
+  .shot-selected { filter: drop-shadow(0 0 6px #fff) drop-shadow(0 0 3px #4fc3f7); }
+  /* 投篮点删除按钮 */
+  .shot-delete-btn {
+    position: absolute; display: none; z-index: 20;
+    padding: 4px 12px; border-radius: 14px; border: 1px solid #e94560;
+    background: #1a1a2e; color: #e94560; font-size: 12px; cursor: pointer;
+    white-space: nowrap; transition: all 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+  .shot-delete-btn:hover { background: #e94560; color: #fff; }
+
+  /* 主体布局 */
+  .main-layout {
+    display: flex; height: calc(100vh - 110px);
+  }
+
+  /* 左侧球员面板 */
+  .player-panel {
+    width: 200px; min-width: 180px;
+    background: #16213e;
+    border-right: 1px solid #0f3460;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .panel-header {
+    padding: 12px 14px; font-size: 13px; color: #888;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid #0f3460;
+  }
+  .panel-header strong { color: #e0e0e0; }
+  .btn-icon {
+    width: 26px; height: 26px; border-radius: 50%;
+    border: 1px solid #e94560; background: transparent; color: #e94560;
+    font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+  }
+  .btn-icon:hover { background: #e94560; color: #fff; }
+
+  .player-list { flex: 1; overflow-y: auto; padding: 8px; }
+  .player-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; border-radius: 8px; cursor: pointer;
+    transition: all 0.2s; margin-bottom: 4px; position: relative;
+    border: 1px solid transparent;
+  }
+  .player-item:hover { background: rgba(233,69,96,0.1); border-color: rgba(233,69,96,0.2); }
+  .player-item.active { background: rgba(233,69,96,0.2); border-color: #e94560; }
+  .player-item.all-players { border: 1px dashed #555; }
+  .player-item.all-players.active { border-color: #e94560; }
+  .player-avatar {
+    width: 36px; height: 36px; border-radius: 50%;
+    object-fit: cover; background: #0f3460;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; flex-shrink: 0; overflow: hidden;
+  }
+  .player-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+  .player-name { font-size: 13px; color: #e0e0e0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .player-actions { display: none; gap: 4px; }
+  .player-item:hover .player-actions { display: flex; }
+  .btn-mini {
+    width: 20px; height: 20px; border-radius: 4px; border: none;
+    font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+  }
+  .btn-edit { background: #0f3460; color: #e94560; }
+  .btn-delete { background: #3d1a1a; color: #e94560; }
+  .btn-edit:hover { background: #e94560; color: #fff; }
+  .btn-delete:hover { background: #e94560; color: #fff; }
+
+  /* 中央球场区域 */
+  .court-area {
+    flex: 1;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    background: #1a1a2e;
+  }
+  .court-container {
+    flex: 1;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+    overflow: hidden;
+    position: relative;
+  }
+  #court-svg {
+    max-width: 100%; max-height: 100%;
+    cursor: crosshair;
+    filter: drop-shadow(0 4px 20px rgba(0,0,0,0.5));
+    /* 横版球场保持宽高比 940:560 */
+  }
+  #court-svg.adding-mode { cursor: crosshair; }
+  #court-svg.normal-mode { cursor: default; }
+
+  /* 添加投篮点工具栏 */
+  .shot-toolbar {
+    padding: 10px 20px;
+    background: #16213e;
+    border-top: 1px solid #0f3460;
+    display: flex; align-items: center; gap: 12px;
+    flex-wrap: wrap;
+  }
+  .shot-toolbar-label { font-size: 13px; color: #888; }
+  .btn-shot-type {
+    padding: 6px 16px; border-radius: 20px; border: 1px solid #555;
+    background: transparent; color: #aaa; font-size: 13px; cursor: pointer;
+    transition: all 0.2s; display: flex; align-items: center; gap: 6px;
+  }
+  .btn-shot-type:hover { border-color: #888; color: #e0e0e0; }
+  .btn-shot-type.active-made { border-color: #4CAF50; background: rgba(76,175,80,0.2); color: #4CAF50; }
+  .btn-shot-type.active-miss { border-color: #e94560; background: rgba(233,69,96,0.2); color: #e94560; }
+  .btn-confirm-shots {
+    padding: 6px 20px; border-radius: 20px; border: none;
+    background: #e94560; color: #fff; font-size: 13px; cursor: pointer;
+    transition: all 0.2s; margin-left: auto;
+  }
+  .btn-confirm-shots:hover { background: #c73652; }
+  .btn-cancel-shots {
+    padding: 6px 16px; border-radius: 20px; border: 1px solid #555;
+    background: transparent; color: #aaa; font-size: 13px; cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-cancel-shots:hover { border-color: #e94560; color: #e94560; }
+  .pending-count {
+    padding: 4px 10px; border-radius: 12px; background: #0f3460;
+    font-size: 12px; color: #aaa;
+  }
+  .pending-count span { color: #e94560; font-weight: bold; }
+
+  /* 右侧统计面板 */
+  .stats-panel {
+    width: 220px; min-width: 200px;
+    background: #16213e;
+    border-left: 1px solid #0f3460;
+    display: flex; flex-direction: column;
+    overflow-y: auto;
+  }
+  .stats-title {
+    padding: 12px 14px; font-size: 13px; color: #888;
+    border-bottom: 1px solid #0f3460;
+  }
+  .stats-title strong { color: #e0e0e0; }
+  .stats-block { padding: 14px; border-bottom: 1px solid #0f3460; }
+  .stats-player-name {
+    font-size: 14px; color: #e0e0e0; font-weight: bold; margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .stat-row {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 8px;
+  }
+  .stat-label { font-size: 12px; color: #888; }
+  .stat-value { font-size: 18px; font-weight: bold; color: #e0e0e0; }
+  .stat-value.made { color: #4CAF50; }
+  .stat-value.rate { color: #FFC107; }
+  .rate-bar {
+    width: 100%; height: 6px; background: #0f3460; border-radius: 3px; overflow: hidden; margin-top: 4px;
+  }
+  .rate-fill { height: 100%; background: linear-gradient(90deg, #e94560, #FFC107); border-radius: 3px; transition: width 0.4s; }
+
+  .stats-all-section { padding: 14px; }
+  .stats-all-title { font-size: 12px; color: #888; margin-bottom: 10px; }
+  .player-stat-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    padding: 6px 8px; border-radius: 6px; background: #0f3460;
+  }
+  .player-stat-avatar {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: #16213e; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; flex-shrink: 0; overflow: hidden;
+  }
+  .player-stat-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+  .player-stat-info { flex: 1; min-width: 0; }
+  .player-stat-name { font-size: 11px; color: #e0e0e0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .player-stat-nums { font-size: 11px; color: #888; }
+  .player-stat-rate { font-size: 12px; color: #FFC107; font-weight: bold; }
+
+  /* 模态框 */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000; backdrop-filter: blur(4px);
+  }
+  .modal-overlay.hidden { display: none; }
+  .modal {
+    background: #16213e; border: 1px solid #0f3460; border-radius: 12px;
+    padding: 24px; width: 380px; max-width: 90vw;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .modal-title { font-size: 18px; color: #fff; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
+  .modal-title span { color: #e94560; }
+  .form-group { margin-bottom: 16px; }
+  .form-label { font-size: 13px; color: #888; margin-bottom: 6px; display: block; }
+  .form-input {
+    width: 100%; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid #0f3460; background: #1a1a2e; color: #e0e0e0;
+    font-size: 14px; outline: none; transition: border-color 0.2s;
+  }
+  .form-input:focus { border-color: #e94560; }
+  .avatar-preview-row {
+    display: flex; align-items: center; gap: 12px; margin-top: 8px;
+  }
+  .avatar-preview {
+    width: 56px; height: 56px; border-radius: 50%;
+    background: #0f3460; display: flex; align-items: center; justify-content: center;
+    font-size: 24px; overflow: hidden; flex-shrink: 0; border: 2px solid #0f3460;
+  }
+  .avatar-preview img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+  .btn-upload {
+    padding: 8px 16px; border-radius: 8px; border: 1px dashed #e94560;
+    background: transparent; color: #e94560; font-size: 13px; cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-upload:hover { background: rgba(233,69,96,0.1); }
+  .modal-actions { display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end; }
+  .btn-primary {
+    padding: 10px 24px; border-radius: 8px; border: none;
+    background: #e94560; color: #fff; font-size: 14px; cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-primary:hover { background: #c73652; }
+  .btn-secondary {
+    padding: 10px 24px; border-radius: 8px; border: 1px solid #555;
+    background: transparent; color: #aaa; font-size: 14px; cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-secondary:hover { border-color: #888; color: #e0e0e0; }
+
+  /* 确认删除 */
+  .confirm-modal {
+    background: #16213e; border: 1px solid #e94560; border-radius: 12px;
+    padding: 24px; width: 320px; max-width: 90vw;
+  }
+  .confirm-title { font-size: 16px; color: #fff; margin-bottom: 12px; }
+  .confirm-text { font-size: 13px; color: #888; margin-bottom: 20px; line-height: 1.6; }
+
+  /* Toast */
+  .toast {
+    position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+    background: #333; color: #fff; padding: 10px 24px; border-radius: 20px;
+    font-size: 14px; z-index: 2000; opacity: 0; transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
+  .toast.success { background: #2d6a4f; }
+  .toast.error { background: #6b2737; }
+
+  /* 添加模式提示条 */
+  .adding-hint {
+    padding: 8px 20px; background: rgba(233,69,96,0.15); border-bottom: 1px solid rgba(233,69,96,0.3);
+    font-size: 13px; color: #e94560; text-align: center; display: none;
+  }
+  .adding-hint.show { display: block; }
+
+  /* 滚动条 */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #0f3460; border-radius: 2px; }
+
+  /* 颜色点 */
+  .color-dot {
+    width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+  }
+
+  /* 无数据提示 */
+  .empty-hint {
+    text-align: center; padding: 30px 10px; color: #555; font-size: 13px;
+  }
+
+  /* 场次输入模态 */
+  .session-modal {
+    background: #16213e; border: 1px solid #0f3460; border-radius: 12px;
+    padding: 24px; width: 340px; max-width: 90vw;
+  }
+
+  /* ============================== */
+  /* 移动端适配 */
+  /* ============================== */
+  @media (max-width: 768px) {
+    /* 顶部标题 */
+    .top-bar { padding: 8px 12px; }
+    .top-bar h1 { font-size: 16px; }
+    .top-bar div { display: none; }
+
+    /* 场次条 */
+    .session-bar { padding: 6px 10px; gap: 8px; }
+    .session-label { font-size: 12px; }
+    .session-chip { padding: 4px 10px; font-size: 12px; }
+    .btn-add-session { padding: 4px 10px; font-size: 12px; }
+    .session-actions button { width: 24px; height: 24px; font-size: 11px; }
+
+    /* 主体改为垂直布局 */
+    .main-layout {
+      flex-direction: column;
+      height: auto;
+      min-height: calc(100vh - 100px);
+    }
+
+    /* 球员面板：水平滚动条 */
+    .player-panel {
+      width: 100%; min-width: 0;
+      border-right: none;
+      border-bottom: 1px solid #0f3460;
+      flex-shrink: 0;
+    }
+    .panel-header {
+      padding: 6px 10px;
+      border-bottom: none;
+    }
+    .panel-header strong { font-size: 12px; }
+    .btn-icon { width: 22px; height: 22px; font-size: 14px; }
+    .player-list {
+      display: flex;
+      flex-direction: row;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 4px 8px 6px;
+      gap: 6px;
+      flex: 1;
+      flex-wrap: nowrap;
+    }
+    .player-item {
+      flex-shrink: 0;
+      flex-direction: column;
+      padding: 4px 8px;
+      margin-bottom: 0;
+      gap: 2px;
+      min-width: 54px;
+      align-items: center;
+      justify-content: center;
+    }
+    .player-item.all-players { border: 1px dashed #555; }
+    .player-avatar { width: 30px; height: 30px; font-size: 14px; }
+    .player-name { font-size: 10px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 54px; }
+    .player-actions { display: none !important; }
+
+    /* 球场区域 */
+    .court-area { flex: 1; min-height: 300px; }
+    .court-container { padding: 8px; }
+
+    /* 工具栏 */
+    .shot-toolbar {
+      padding: 6px 10px;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .btn-shot-type { padding: 4px 10px; font-size: 12px; }
+    .btn-confirm-shots { padding: 4px 12px; font-size: 12px; margin-left: 0; }
+    .btn-cancel-shots { padding: 4px 10px; font-size: 12px; }
+    .pending-count { padding: 2px 8px; font-size: 11px; }
+
+    /* 统计面板 */
+    .stats-panel {
+      width: 100%; min-width: 0;
+      border-left: none;
+      border-top: 1px solid #0f3460;
+      max-height: 220px;
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+    .stats-block { padding: 10px; }
+    .stats-player-name { font-size: 13px; margin-bottom: 8px; }
+    .stat-value { font-size: 15px; }
+    .stats-all-section { padding: 10px; }
+
+    /* 投篮点删除按钮移动端适配 */
+    .shot-delete-btn { font-size: 11px; padding: 3px 10px; }
+
+    /* 模态框移动端适配 */
+    .modal { padding: 16px; width: 95vw; }
+    .session-modal { padding: 16px; width: 95vw; }
+    .confirm-modal { padding: 16px; width: 95vw; }
+  }
+
+  /* 小屏手机（<400px）进一步优化 */
+  @media (max-width: 400px) {
+    .top-bar h1 { font-size: 14px; }
+    .player-avatar { width: 26px; height: 26px; font-size: 12px; }
+    .player-name { max-width: 44px; font-size: 9px; }
+    .player-item { min-width: 44px; padding: 3px 6px; }
+    .btn-shot-type { padding: 3px 8px; font-size: 11px; }
+    .stat-value { font-size: 14px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 顶部标题 -->
+<div class="top-bar">
+  <h1>🏀 <span>篮球</span>投篮点标记系统</h1>
+  <div style="font-size:12px;color:#555;">FIBA标准球场 · 数据可视化</div>
+</div>
+
+<!-- 场次条 -->
+<div class="session-bar">
+  <span class="session-label">场次：</span>
+  <div class="session-list" id="sessionList"></div>
+  <button class="btn-add-session" onclick="openAddSession()">＋ 新建场次</button>
+</div>
+
+<!-- 主体 -->
+<div class="main-layout">
+  <!-- 左侧球员面板 -->
+  <div class="player-panel">
+    <div class="panel-header">
+      <strong>球员列表</strong>
+      <button class="btn-icon" title="添加球员" onclick="openAddPlayer()">＋</button>
+    </div>
+    <div class="player-list" id="playerList"></div>
+  </div>
+
+  <!-- 中央球场 -->
+  <div class="court-area">
+    <div class="adding-hint" id="addingHint">
+      🎯 点击球场任意位置添加投篮点（当前：<span id="hintType">投进</span>）
+    </div>
+    <div class="court-container">
+      <!--
+        参考图分析（横向全场，左右对称两个半场）：
+        viewBox: 0 0 940 560
+
+        FIBA 28m×15m 全场，1m ≈ 940/28 = 33.57px（x方向），560/15 = 37.33px（y方向）
+        边线: x=10,y=10 ~ x=930,y=550
+
+        ── 禁区（Paint / Key Area）──
+          宽（沿边线方向）= 4.9m × 37.33 = 182.9 ≈ 183px
+          深（从端线向内） = 5.8m × 33.57 = 194.7 ≈ 195px
+          y范围：中心y=280，上边y=280-183/2=188.5→189，下边y=280+183/2=371.5→371
+          左禁区：x=10 ~ x=10+195=205
+          右禁区：x=930-195=735 ~ x=930
+
+        ── 小禁区（Restricted Area box）──
+          宽=3.6m×37.33=134.4≈134px，y=280-67=213 ~ y=280+67=347
+          深=2.75m×33.57=92.3≈92px（从端线）
+          左: x=10 ~ x=102, y=213~347
+          右: x=930-92=838 ~ x=930, y=213~347
+
+        ── 篮筐/篮板 ──
+          篮筐圆心距端线=1.575m×33.57=52.9≈53px
+          篮板距端线=1.2m×33.57=40.3≈40px，篮板宽1.83m×37.33=68.3≈68px
+          篮筐显示半径≈15px
+          左: 篮筐cx=10+53=63, cy=280; 篮板x=10+40=50, y=280-34=246, h=68, w=3
+          右: 篮筐cx=930-53=877, cy=280; 篮板x=930-40-3=887, y=246, h=68, w=3
+
+        ── 罚球线/罚球圈 ──
+          圆心 = 禁区远端中心 (左:205,280) (右:735,280)
+          半径=1.8m×33.57=60.4≈60px（x方向）... 实际用60px
+          罚球线=禁区外边（左x=205，右x=735），禁区高度范围y=189~371
+          罚球圈朝中场方向=半圆实线，朝端线方向=半圆虚线
+
+        ── 限制弧（No-Charge Semicircle）──
+          半径=1.25m×33.57=41.96≈42px
+          左圆心=(63,280)，右圆心=(877,280)
+          仅在场内的半圆（左朝右，右朝左）
+
+        ── 三分线 ──
+          圆弧圆心=篮筐圆心，半径=6.75m×33.57=226.6≈227px
+          距边线直线段=0.9m×37.33=33.6≈34px（y=10+34=44, y=550-34=516）
+          端点计算（左，圆心x=63,y=280,r=227）：
+            在x=10时: dx=53, dy=sqrt(227²-53²)=sqrt(51529-2809)=sqrt(48720)≈220.7
+            y=280-220.7=59.3≈59, y=280+220.7=500.7≈501
+          但直线段起点贴边线y=44 & y=516，终点接弧 → 弧端点(10,59)和(10,501)
+          右镜像: 圆心(877,280), x=930时dx=53同上 → 弧端点(930,59)和(930,501)
+      -->
+      <svg id="court-svg" class="normal-mode" viewBox="0 0 940 560" xmlns="http://www.w3.org/2000/svg">
+
+        <!-- 球场底色 -->
+        <rect width="940" height="560" fill="#f0ece4"/>
+        <!-- 球场内地板 -->
+        <rect x="10" y="10" width="920" height="540" fill="#f5f0e8"/>
+        <!-- 球场边线 -->
+        <rect x="10" y="10" width="920" height="540" fill="none" stroke="#222" stroke-width="2.5"/>
+
+        <!-- 中线 -->
+        <line x1="470" y1="10" x2="470" y2="550" stroke="#111" stroke-width="2"/>
+
+        <!-- 中圈 (r=50) -->
+        <circle cx="470" cy="280" r="50" fill="none" stroke="#111" stroke-width="2"/>
+
+
+        <!-- ===== 左半场 ===== -->
+
+        <!-- 左禁区外框（Paint Area）: 三条边，省去端线侧(x=10)那条竖边 -->
+        <!-- 填色层 -->
+        <rect x="10" y="202" width="165" height="155" fill="rgba(190,120,70,0.2)" stroke="none"/>
+        <!-- 上边 -->
+        <line x1="10" y1="202" x2="175" y2="202" stroke="#111" stroke-width="2"/>
+        <!-- 下边 -->
+        <line x1="10" y1="357" x2="175" y2="357" stroke="#111" stroke-width="2"/>
+        <!-- 远端竖边（朝中场侧） -->
+        <line x1="175" y1="202" x2="175" y2="357" stroke="#111" stroke-width="2"/>
+
+        <!-- 左罚球圈：圆心(175,280), r=50
+             朝中场方向（右侧）半圆实线: 从(175,230)到(175,330)顺时针
+             朝端线方向（左侧）半圆虚线 -->
+        <path d="M 175 230 A 50 50 0 0 1 175 330" fill="none" stroke="#111" stroke-width="2"/>
+        <path d="M 175 230 A 50 50 0 0 0 175 330" fill="none" stroke="#111" stroke-width="2" stroke-dasharray="10,7"/>
+
+        <!-- 左三分线
+             直线段（贴边线）从端线到弧起点: x=10, y=10~59 和 y=501~550
+             弧: (10,59) ~ (10,501)，圆心(63,280)，r=227
+        -->
+        <line x1="10" y1="10" x2="10" y2="45" stroke="#111" stroke-width="2"/>
+        <line x1="10" y1="514" x2="10" y2="550" stroke="#111" stroke-width="2"/>
+        <path d="M 10 45 A 227 227 0 0 1 10 514" fill="none" stroke="#111" stroke-width="2"/>
+
+        <!-- ===== 右半场 ===== -->
+
+        <!-- 右禁区外框（Paint Area）: 三条边，省去端线侧(x=930)那条竖边 -->
+        <!-- 填色层 -->
+        <rect x="765" y="202" width="165" height="155" fill="rgba(190,120,70,0.2)" stroke="none"/>
+        <!-- 上边 -->
+        <line x1="930" y1="202" x2="765" y2="202" stroke="#111" stroke-width="2"/>
+        <!-- 下边 -->
+        <line x1="930" y1="357" x2="765" y2="357" stroke="#111" stroke-width="2"/>
+        <!-- 远端竖边（朝中场侧） -->
+        <line x1="765" y1="202" x2="765" y2="357" stroke="#111" stroke-width="2"/>
+
+        <!-- 右罚球圈：圆心(765,280), r=50
+             朝中场方向（左侧）半圆实线: 从(765,230)到(765,330)逆时针
+             朝端线方向（右侧）半圆虚线 -->
+        <path d="M 765 230 A 50 50 0 0 0 765 330" fill="none" stroke="#111" stroke-width="2"/>
+        <path d="M 765 230 A 50 50 0 0 1 765 330" fill="none" stroke="#111" stroke-width="2" stroke-dasharray="10,7"/>
+
+        <!-- 右三分线
+             直线段（贴边线）从端线到弧起点: x=930, y=10~45 和 y=514~550
+             弧: (930,45) ~ (930,514)，圆心(877,280)，r=227
+        -->
+        <line x1="930" y1="10" x2="930" y2="45" stroke="#111" stroke-width="2"/>
+        <line x1="930" y1="514" x2="930" y2="550" stroke="#111" stroke-width="2"/>
+        <path d="M 930 45 A 227 227 0 0 0 930 514" fill="none" stroke="#111" stroke-width="2"/>
+
+        <!-- 投篮点层（动态生成） -->
+        <g id="shots-layer"></g>
+        <!-- 临时预览点层 -->
+        <g id="preview-layer"></g>
+      </svg>
+      <button class="shot-delete-btn" id="shotDeleteBtn" onclick="deleteSelectedShot()">🗑️ 删除</button>
+    </div>
+
+    <!-- 投篮工具栏 -->
+    <div class="shot-toolbar">
+      <span class="shot-toolbar-label">录入投篮：</span>
+      <button class="btn-shot-type" id="btnMade" onclick="setShotMode('made')">
+        ⭕ 投进
+      </button>
+      <button class="btn-shot-type" id="btnMiss" onclick="setShotMode('miss')">
+        ✕ 未投进
+      </button>
+      <span class="pending-count">待保存：<span id="pendingCount">0</span> 个</span>
+      <button class="btn-cancel-shots" id="btnCancelShots" onclick="cancelPendingShots()" style="display:none;">取消</button>
+      <button class="btn-confirm-shots" id="btnConfirmShots" onclick="confirmShots()" style="display:none;">💾 保存投篮点</button>
+    </div>
+  </div>
+
+  <!-- 右侧统计 -->
+  <div class="stats-panel">
+    <div class="stats-title"><strong>📊 数据统计</strong></div>
+    <div id="statsContent"></div>
+  </div>
+</div>
+
+<!-- 添加/编辑球员模态 -->
+<div class="modal-overlay hidden" id="playerModal">
+  <div class="modal">
+    <div class="modal-title">🏃 <span id="playerModalTitle">添加球员</span></div>
+    <div class="form-group">
+      <label class="form-label">球员姓名 *</label>
+      <input class="form-input" id="playerNameInput" type="text" placeholder="输入球员姓名..." maxlength="20"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">球员头像</label>
+      <div class="avatar-preview-row">
+        <div class="avatar-preview" id="avatarPreview">🏀</div>
+        <div>
+          <button class="btn-upload" onclick="document.getElementById('avatarFileInput').click()">📁 上传图片</button>
+          <input type="file" id="avatarFileInput" accept="image/*" style="display:none" onchange="handleAvatarUpload(event)"/>
+          <div style="font-size:11px;color:#555;margin-top:6px;">支持 JPG/PNG，建议正方形图片</div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closePlayerModal()">取消</button>
+      <button class="btn-primary" onclick="savePlayer()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 删除确认模态 -->
+<div class="modal-overlay hidden" id="confirmModal">
+  <div class="confirm-modal">
+    <div class="confirm-title">⚠️ 确认删除</div>
+    <div class="confirm-text" id="confirmText"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeConfirmModal()">取消</button>
+      <button class="btn-primary" onclick="executeConfirm()" style="background:#e94560;">删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- 新建场次模态 -->
+<div class="modal-overlay hidden" id="sessionModal">
+  <div class="session-modal">
+    <div class="modal-title">🏆 <span id="sessionModalTitle">新建场次</span></div>
+    <div class="form-group">
+      <label class="form-label">场次名称 *</label>
+      <input class="form-input" id="sessionNameInput" type="text" placeholder="例：2026-04-22 训练赛" maxlength="30"/>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeSessionModal()">取消</button>
+      <button class="btn-primary" id="sessionModalSaveBtn" onclick="saveSession()">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================
+// 数据结构
+// ============================
+let state = {
+  sessions: [],          // [{id, name}]
+  players: [],           // [{id, name, avatar}]  全局球员池
+  shots: {},             // {sessionId: {playerId: [{x,y,made}]}}
+  currentSession: null,
+  currentPlayer: 'all',  // 'all' 或 playerId
+  addingMode: null,      // null | 'made' | 'miss'
+  pendingShots: [],      // [{x,y,made}] 待保存
+  editingPlayerId: null,
+  confirmCallback: null,
+  tempAvatar: null,
+};
+
+// ============================
+// 本地存储
+// ============================
+function saveData() {
+  localStorage.setItem('bball_tracker', JSON.stringify({
+    sessions: state.sessions,
+    players: state.players,
+    shots: state.shots,
+  }));
+}
+
+function loadData() {
+  const raw = localStorage.getItem('bball_tracker');
+  if (raw) {
+    try {
+      const d = JSON.parse(raw);
+      state.sessions = d.sessions || [];
+      state.players = d.players || [];
+      state.shots = d.shots || {};
+    } catch(e) {}
+  }
+  // 默认场次
+  if (state.sessions.length === 0) {
+    const id = genId();
+    state.sessions.push({ id, name: '2026-04-22 训练赛' });
+    state.currentSession = id;
+    saveData();
+  } else {
+    state.currentSession = state.sessions[0].id;
+  }
+}
+
+function genId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+}
+
+// ============================
+// 渲染入口
+// ============================
+function render() {
+  renderSessions();
+  renderPlayers();
+  renderShots();
+  renderStats();
+}
+
+// ============================
+// 场次渲染
+// ============================
+function renderSessions() {
+  const list = document.getElementById('sessionList');
+  list.innerHTML = state.sessions.map(s => {
+    const isActive = s.id === state.currentSession;
+    return `<div style="display:flex;align-items:center;gap:4px;">
+      <div class="session-chip ${isActive ? 'active' : ''}"
+        onclick="switchSession('${s.id}')"
+        title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</div>
+      ${isActive ? `<div class="session-actions">
+        <button class="btn-edit-session" onclick="event.stopPropagation();editSession('${s.id}')" title="编辑场次名称">✏️</button>
+        <button class="btn-del-session" onclick="event.stopPropagation();deleteSession('${s.id}')" title="删除场次">🗑️</button>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function switchSession(id) {
+  cancelPendingShots(true);
+  state.currentSession = id;
+  state.currentPlayer = 'all';
+  state.addingMode = null;
+  updateAddingModeUI();
+  render();
+}
+
+function openAddSession() {
+  document.getElementById('sessionNameInput').value = '';
+  document.getElementById('sessionModalTitle').textContent = '新建场次';
+  document.getElementById('sessionModalSaveBtn').textContent = '创建';
+  document.getElementById('sessionModalSaveBtn').onclick = saveSession;
+  document.getElementById('sessionModal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('sessionNameInput').focus(), 100);
+}
+
+function closeSessionModal() {
+  document.getElementById('sessionModal').classList.add('hidden');
+}
+
+function saveSession() {
+  const name = document.getElementById('sessionNameInput').value.trim();
+  if (!name) { showToast('请输入场次名称', 'error'); return; }
+  const id = genId();
+  state.sessions.push({ id, name });
+  saveData();
+  closeSessionModal();
+  switchSession(id);
+  showToast('场次已创建', 'success');
+}
+
+function editSession(id) {
+  const s = state.sessions.find(s => s.id === id);
+  if (!s) return;
+  document.getElementById('sessionNameInput').value = s.name;
+  document.getElementById('sessionModalTitle').textContent = '编辑场次';
+  document.getElementById('sessionModalSaveBtn').textContent = '保存';
+  document.getElementById('sessionModalSaveBtn').onclick = function() {
+    const name = document.getElementById('sessionNameInput').value.trim();
+    if (!name) { showToast('请输入场次名称', 'error'); return; }
+    s.name = name;
+    saveData();
+    closeSessionModal();
+    renderSessions();
+    showToast('场次已更新', 'success');
+  };
+  document.getElementById('sessionModal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('sessionNameInput').focus(), 100);
+}
+
+function deleteSession(id) {
+  const s = state.sessions.find(s => s.id === id);
+  if (!s) return;
+  if (state.sessions.length <= 1) { showToast('至少保留一个场次', 'error'); return; }
+  document.getElementById('confirmText').innerHTML =
+    `确定要删除场次 <strong>${escapeHtml(s.name)}</strong> 吗？<br><small style="color:#e94560;">该场次的所有投篮记录也将一并删除。</small>`;
+  state.confirmCallback = () => {
+    state.sessions = state.sessions.filter(s => s.id !== id);
+    if (state.shots[id]) delete state.shots[id];
+    if (state.currentSession === id) {
+      state.currentSession = state.sessions[0].id;
+      state.currentPlayer = 'all';
+    }
+    saveData();
+    render();
+    showToast('场次已删除', 'success');
+  };
+  document.getElementById('confirmModal').classList.remove('hidden');
+}
+
+function renameSession(id, oldName) {
+  const newName = prompt('重命名场次：', oldName);
+  if (newName && newName.trim()) {
+    const s = state.sessions.find(s => s.id === id);
+    if (s) { s.name = newName.trim(); saveData(); renderSessions(); }
+  }
+}
+
+// ============================
+// 球员渲染
+// ============================
+function renderPlayers() {
+  const list = document.getElementById('playerList');
+  let html = '';
+
+  // "全部球员"选项
+  html += `<div class="player-item all-players ${state.currentPlayer === 'all' ? 'active' : ''}"
+    onclick="selectPlayer('all')">
+    <div class="player-avatar" style="font-size:18px;">👥</div>
+    <span class="player-name">所有球员</span>
+  </div>`;
+
+  // 获取当前场次的球员（有投篮记录 或 全局球员）
+  state.players.forEach(p => {
+    html += `<div class="player-item ${state.currentPlayer === p.id ? 'active' : ''}"
+      onclick="selectPlayer('${p.id}')">
+      <div class="player-avatar">${avatarHtml(p)}</div>
+      <span class="player-name">${escapeHtml(p.name)}</span>
+      <div class="player-actions">
+        <button class="btn-mini btn-edit" title="编辑" onclick="event.stopPropagation();openEditPlayer('${p.id}')">✏</button>
+        <button class="btn-mini btn-delete" title="删除" onclick="event.stopPropagation();confirmDeletePlayer('${p.id}')">✕</button>
+      </div>
+    </div>`;
+  });
+
+  if (state.players.length === 0) {
+    html += `<div class="empty-hint">暂无球员<br><small>点击右上角 ＋ 添加</small></div>`;
+  }
+
+  list.innerHTML = html;
+}
+
+function avatarHtml(p) {
+  if (p.avatar) {
+    return `<img src="${p.avatar}" alt="${escapeHtml(p.name)}"/>`;
+  }
+  return `<span style="font-size:16px;">🏀</span>`;
+}
+
+function selectPlayer(id) {
+  state.currentPlayer = id;
+  renderPlayers();
+  renderShots();
+  renderStats();
+}
+
+function openAddPlayer() {
+  state.editingPlayerId = null;
+  state.tempAvatar = null;
+  document.getElementById('playerModalTitle').textContent = '添加球员';
+  document.getElementById('playerNameInput').value = '';
+  document.getElementById('avatarPreview').innerHTML = '🏀';
+  document.getElementById('playerModal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('playerNameInput').focus(), 100);
+}
+
+function openEditPlayer(id) {
+  const p = state.players.find(p => p.id === id);
+  if (!p) return;
+  state.editingPlayerId = id;
+  state.tempAvatar = p.avatar || null;
+  document.getElementById('playerModalTitle').textContent = '编辑球员';
+  document.getElementById('playerNameInput').value = p.name;
+  document.getElementById('avatarPreview').innerHTML = p.avatar
+    ? `<img src="${p.avatar}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"/>`
+    : '🏀';
+  document.getElementById('playerModal').classList.remove('hidden');
+}
+
+function closePlayerModal() {
+  document.getElementById('playerModal').classList.add('hidden');
+  state.editingPlayerId = null;
+  state.tempAvatar = null;
+}
+
+function savePlayer() {
+  const name = document.getElementById('playerNameInput').value.trim();
+  if (!name) { showToast('请输入球员姓名', 'error'); return; }
+
+  if (state.editingPlayerId) {
+    const p = state.players.find(p => p.id === state.editingPlayerId);
+    if (p) {
+      p.name = name;
+      if (state.tempAvatar !== undefined) p.avatar = state.tempAvatar;
+    }
+    showToast('球员信息已更新', 'success');
+  } else {
+    const id = genId();
+    state.players.push({ id, name, avatar: state.tempAvatar || null });
+    showToast('球员已添加', 'success');
+  }
+
+  saveData();
+  closePlayerModal();
+  render();
+}
+
+function handleAvatarUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  if (file.size > 2 * 1024 * 1024) { showToast('图片不能超过2MB', 'error'); return; }
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    state.tempAvatar = e.target.result;
+    document.getElementById('avatarPreview').innerHTML =
+      `<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"/>`;
+  };
+  reader.readAsDataURL(file);
+}
+
+function confirmDeletePlayer(id) {
+  const p = state.players.find(p => p.id === id);
+  if (!p) return;
+  document.getElementById('confirmText').innerHTML =
+    `确定要删除球员 <strong>${escapeHtml(p.name)}</strong> 吗？<br><small style="color:#e94560;">该球员在所有场次中的投篮记录也将一并删除。</small>`;
+  state.confirmCallback = () => {
+    // 删除球员
+    state.players = state.players.filter(p => p.id !== id);
+    // 删除所有场次中该球员的记录
+    Object.keys(state.shots).forEach(sid => {
+      if (state.shots[sid]) delete state.shots[sid][id];
+    });
+    if (state.currentPlayer === id) state.currentPlayer = 'all';
+    saveData();
+    render();
+    showToast('球员已删除', 'success');
+  };
+  document.getElementById('confirmModal').classList.remove('hidden');
+}
+
+function closeConfirmModal() {
+  document.getElementById('confirmModal').classList.add('hidden');
+  state.confirmCallback = null;
+}
+
+function executeConfirm() {
+  if (state.confirmCallback) state.confirmCallback();
+  closeConfirmModal();
+}
+
+// ============================
+// 投篮模式控制
+// ============================
+function setShotMode(mode) {
+  if (state.players.length === 0) { showToast('请先添加球员', 'error'); return; }
+  if (state.currentPlayer === 'all') { showToast('请先选择一名球员', 'error'); return; }
+
+  if (state.addingMode === mode) {
+    // 再次点击同一按钮取消模式
+    state.addingMode = null;
+  } else {
+    state.addingMode = mode;
+  }
+  updateAddingModeUI();
+}
+
+function updateAddingModeUI() {
+  const btnMade = document.getElementById('btnMade');
+  const btnMiss = document.getElementById('btnMiss');
+  const hint = document.getElementById('addingHint');
+  const btnConfirm = document.getElementById('btnConfirmShots');
+  const btnCancel = document.getElementById('btnCancelShots');
+  const svg = document.getElementById('court-svg');
+
+  btnMade.className = 'btn-shot-type' + (state.addingMode === 'made' ? ' active-made' : '');
+  btnMiss.className = 'btn-shot-type' + (state.addingMode === 'miss' ? ' active-miss' : '');
+
+  const hasPending = state.pendingShots.length > 0;
+  btnConfirm.style.display = (hasPending) ? 'block' : 'none';
+  btnCancel.style.display = (hasPending || state.addingMode) ? 'block' : 'none';
+
+  document.getElementById('pendingCount').textContent = state.pendingShots.length;
+
+  if (state.addingMode) {
+    hint.classList.add('show');
+    document.getElementById('hintType').textContent = state.addingMode === 'made' ? '投进 ⭕' : '未投进 ✕';
+    svg.classList.remove('normal-mode');
+    svg.classList.add('adding-mode');
+  } else {
+    hint.classList.remove('show');
+    svg.classList.remove('adding-mode');
+    svg.classList.add('normal-mode');
+  }
+}
+
+function cancelPendingShots(silent) {
+  state.pendingShots = [];
+  state.addingMode = null;
+  // 清除预览层
+  document.getElementById('preview-layer').innerHTML = '';
+  updateAddingModeUI();
+  if (!silent) showToast('已取消', 'success');
+}
+
+function confirmShots() {
+  if (state.pendingShots.length === 0) return;
+  if (!state.currentSession || state.currentPlayer === 'all') return;
+
+  if (!state.shots[state.currentSession]) state.shots[state.currentSession] = {};
+  if (!state.shots[state.currentSession][state.currentPlayer]) state.shots[state.currentSession][state.currentPlayer] = [];
+
+  state.shots[state.currentSession][state.currentPlayer].push(...state.pendingShots);
+  state.pendingShots = [];
+  document.getElementById('preview-layer').innerHTML = '';
+  state.addingMode = null;
+  updateAddingModeUI();
+  saveData();
+  renderShots();
+  renderStats();
+  showToast(`投篮点已保存`, 'success');
+}
+
+// ============================
+// SVG 点击处理
+// ============================
+document.getElementById('court-svg').addEventListener('click', function(e) {
+  if (!state.addingMode) {
+    // 非添加模式下，点击空白处取消选中投篮点
+    if (!e.target.closest('[data-player-id]')) hideShotDeleteBtn();
+    return;
+  }
+  if (state.currentPlayer === 'all') return;
+
+  const svg = this;
+  const pt = svg.createSVGPoint();
+  pt.x = e.clientX;
+  pt.y = e.clientY;
+  const svgP = pt.matrixTransform(svg.getScreenCTM().inverse());
+
+  // 检查是否在球场范围内
+  if (svgP.x < 10 || svgP.x > 550 || svgP.y < 10 || svgP.y > 930) return;
+
+  const shot = { x: svgP.x, y: svgP.y, made: state.addingMode === 'made' };
+  state.pendingShots.push(shot);
+
+  // 绘制预览点
+  drawShotMark(document.getElementById('preview-layer'), shot, true);
+  updateAddingModeUI();
+});
+
+// ============================
+// 投篮点绘制
+// ============================
+function renderShots() {
+  const layer = document.getElementById('shots-layer');
+  layer.innerHTML = '';
+  // 隐藏删除按钮
+  hideShotDeleteBtn();
+
+  if (!state.currentSession) return;
+  const sessionShots = state.shots[state.currentSession] || {};
+
+  if (state.currentPlayer === 'all') {
+    // 显示所有球员（不同颜色）
+    const colors = ['#4CAF50','#2196F3','#FF9800','#9C27B0','#00BCD4','#FF5722','#FFEB3B','#E91E63'];
+    state.players.forEach((p, idx) => {
+      const shots = sessionShots[p.id] || [];
+      const color = colors[idx % colors.length];
+      shots.forEach((s, i) => {
+        // 未投进的投篮点统一用红色，投进的用球员对应颜色
+        const shotColor = s.made ? color : '#e94560';
+        drawShotMark(layer, s, false, shotColor, p.id, i);
+      });
+    });
+  } else {
+    const shots = sessionShots[state.currentPlayer] || [];
+    shots.forEach((s, i) => drawShotMark(layer, s, false, null, state.currentPlayer, i));
+  }
+}
+
+function drawShotMark(parent, shot, isPreview, customColor, playerId, shotIndex) {
+  const { x, y, made } = shot;
+  const opacity = isPreview ? 0.7 : 0.9;
+
+  if (made) {
+    // 投进：圆圈
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', x);
+    circle.setAttribute('cy', y);
+    circle.setAttribute('r', 8);
+    circle.setAttribute('fill', 'none');
+    circle.setAttribute('stroke', customColor || '#4CAF50');
+    circle.setAttribute('stroke-width', isPreview ? 2.5 : 3);
+    circle.setAttribute('opacity', opacity);
+    if (isPreview) circle.setAttribute('stroke-dasharray', '4,2');
+    if (!isPreview && playerId !== undefined) {
+      circle.setAttribute('data-player-id', playerId);
+      circle.setAttribute('data-shot-index', shotIndex);
+      circle.style.cursor = 'pointer';
+      circle.addEventListener('click', function(e) { e.stopPropagation(); selectShot(this); });
+    }
+    parent.appendChild(circle);
+    // 中心点
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('cx', x);
+    dot.setAttribute('cy', y);
+    dot.setAttribute('r', 2);
+    dot.setAttribute('fill', customColor || '#4CAF50');
+    dot.setAttribute('opacity', opacity);
+    if (!isPreview && playerId !== undefined) {
+      dot.setAttribute('data-player-id', playerId);
+      dot.setAttribute('data-shot-index', shotIndex);
+      dot.style.cursor = 'pointer';
+      dot.style.pointerEvents = 'none'; // 让点击穿透到外圈
+    }
+    parent.appendChild(dot);
+  } else {
+    // 未投进：叉号
+    const size = 7;
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('opacity', opacity);
+    if (!isPreview && playerId !== undefined) {
+      g.setAttribute('data-player-id', playerId);
+      g.setAttribute('data-shot-index', shotIndex);
+      g.style.cursor = 'pointer';
+      g.addEventListener('click', function(e) { e.stopPropagation(); selectShot(this); });
+    }
+    const l1 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    l1.setAttribute('x1', x - size); l1.setAttribute('y1', y - size);
+    l1.setAttribute('x2', x + size); l1.setAttribute('y2', y + size);
+    l1.setAttribute('stroke', customColor || '#e94560');
+    l1.setAttribute('stroke-width', isPreview ? 2 : 2.5);
+    l1.setAttribute('stroke-linecap', 'round');
+    const l2 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    l2.setAttribute('x1', x + size); l2.setAttribute('y1', y - size);
+    l2.setAttribute('x2', x - size); l2.setAttribute('y2', y + size);
+    l2.setAttribute('stroke', customColor || '#e94560');
+    l2.setAttribute('stroke-width', isPreview ? 2 : 2.5);
+    l2.setAttribute('stroke-linecap', 'round');
+    g.appendChild(l1);
+    g.appendChild(l2);
+    parent.appendChild(g);
+  }
+}
+
+// ============================
+// 投篮点选中和删除
+// ============================
+let selectedShotEl = null;
+
+function selectShot(el) {
+  // 取消之前的选中
+  if (selectedShotEl) selectedShotEl.classList.remove('shot-selected');
+  selectedShotEl = el;
+  el.classList.add('shot-selected');
+
+  // 计算按钮位置（基于SVG坐标）
+  const svg = document.getElementById('court-svg');
+  const container = document.querySelector('.court-container');
+  const rect = svg.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
+
+  const playerId = el.getAttribute('data-player-id');
+  const shotIndex = parseInt(el.getAttribute('data-shot-index'));
+
+  // 获取该投篮点的坐标
+  const shot = getShotAt(playerId, shotIndex);
+  if (!shot) return;
+
+  // 将SVG坐标转为屏幕坐标
+  const svgW = rect.width, svgH = rect.height;
+  const viewBox = svg.viewBox.baseVal;
+  const scaleX = svgW / viewBox.width, scaleY = svgH / viewBox.height;
+  const screenX = rect.left - containerRect.left + shot.x * scaleX;
+  const screenY = rect.top - containerRect.top + shot.y * scaleY;
+
+  const btn = document.getElementById('shotDeleteBtn');
+  btn.style.left = (screenX + 14) + 'px';
+  btn.style.top = (screenY - 14) + 'px';
+  btn.style.display = 'block';
+  btn.setAttribute('data-player-id', playerId);
+  btn.setAttribute('data-shot-index', shotIndex);
+}
+
+function hideShotDeleteBtn() {
+  const btn = document.getElementById('shotDeleteBtn');
+  btn.style.display = 'none';
+  if (selectedShotEl) {
+    selectedShotEl.classList.remove('shot-selected');
+    selectedShotEl = null;
+  }
+}
+
+function getShotAt(playerId, shotIndex) {
+  const sessionShots = state.shots[state.currentSession] || {};
+  const shots = sessionShots[playerId] || [];
+  return shots[shotIndex] || null;
+}
+
+function deleteSelectedShot() {
+  const btn = document.getElementById('shotDeleteBtn');
+  const playerId = btn.getAttribute('data-player-id');
+  const shotIndex = parseInt(btn.getAttribute('data-shot-index'));
+
+  const sessionShots = state.shots[state.currentSession];
+  if (sessionShots && sessionShots[playerId]) {
+    sessionShots[playerId].splice(shotIndex, 1);
+    saveData();
+    hideShotDeleteBtn();
+    renderShots();
+    renderStats();
+    showToast('投篮点已删除', 'success');
+  }
+}
+
+// ============================
+// 统计数据渲染
+// ============================
+function renderStats() {
+  const container = document.getElementById('statsContent');
+  if (!state.currentSession) { container.innerHTML = ''; return; }
+  const sessionShots = state.shots[state.currentSession] || {};
+
+  let html = '';
+
+  if (state.currentPlayer === 'all') {
+    // 全部球员汇总
+    let totalAttempts = 0, totalMade = 0;
+    state.players.forEach(p => {
+      const shots = sessionShots[p.id] || [];
+      totalAttempts += shots.length;
+      totalMade += shots.filter(s => s.made).length;
+    });
+    const totalRate = totalAttempts > 0 ? (totalMade / totalAttempts * 100).toFixed(1) : 0;
+
+    html += `<div class="stats-block">
+      <div class="stats-player-name">👥 全队汇总</div>
+      <div class="stat-row"><span class="stat-label">总投篮</span><span class="stat-value">${totalAttempts}</span></div>
+      <div class="stat-row"><span class="stat-label">投进</span><span class="stat-value made">${totalMade}</span></div>
+      <div class="stat-row"><span class="stat-label">命中率</span><span class="stat-value rate">${totalRate}%</span></div>
+      <div class="rate-bar"><div class="rate-fill" style="width:${totalRate}%"></div></div>
+    </div>`;
+
+    // 各球员小卡片
+    if (state.players.length > 0) {
+      html += `<div class="stats-all-section"><div class="stats-all-title">各球员数据</div>`;
+      state.players.forEach(p => {
+        const shots = sessionShots[p.id] || [];
+        const attempts = shots.length;
+        const made = shots.filter(s => s.made).length;
+        const rate = attempts > 0 ? (made / attempts * 100).toFixed(1) : '-';
+        html += `<div class="player-stat-row">
+          <div class="player-stat-avatar">${avatarHtml(p)}</div>
+          <div class="player-stat-info">
+            <div class="player-stat-name">${escapeHtml(p.name)}</div>
+            <div class="player-stat-nums">${attempts}投 ${made}中</div>
+          </div>
+          <div class="player-stat-rate">${rate}${rate !== '-' ? '%' : ''}</div>
+        </div>`;
+      });
+      html += `</div>`;
+    }
+  } else {
+    const p = state.players.find(p => p.id === state.currentPlayer);
+    if (p) {
+      const shots = sessionShots[p.id] || [];
+      const attempts = shots.length;
+      const made = shots.filter(s => s.made).length;
+      const miss = attempts - made;
+      const rate = attempts > 0 ? (made / attempts * 100).toFixed(1) : 0;
+
+      html += `<div class="stats-block">
+        <div class="stats-player-name">
+          <div class="player-avatar" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:50%;overflow:hidden;background:#0f3460;flex-shrink:0;">${avatarHtml(p)}</div>
+          ${escapeHtml(p.name)}
+        </div>
+        <div class="stat-row"><span class="stat-label">总投篮</span><span class="stat-value">${attempts}</span></div>
+        <div class="stat-row"><span class="stat-label">投进</span><span class="stat-value made">${made}</span></div>
+        <div class="stat-row"><span class="stat-label">未投进</span><span class="stat-value" style="color:#e94560;">${miss}</span></div>
+        <div class="stat-row"><span class="stat-label">命中率</span><span class="stat-value rate">${rate}%</span></div>
+        <div class="rate-bar"><div class="rate-fill" style="width:${rate}%"></div></div>
+      </div>`;
+
+      // 删除投篮记录按钮
+      if (attempts > 0) {
+        html += `<div style="padding:10px 14px;">
+          <button onclick="confirmClearShots('${p.id}')" style="width:100%;padding:8px;border-radius:8px;border:1px solid #555;background:transparent;color:#888;font-size:12px;cursor:pointer;" onmouseover="this.style.borderColor='#e94560';this.style.color='#e94560';" onmouseout="this.style.borderColor='#555';this.style.color='#888';">
+            🗑 清除该球员本场投篮记录
+          </button>
+        </div>`;
+      }
+    }
+  }
+
+  if (!html) {
+    html = `<div class="empty-hint">选择球员<br>查看统计数据</div>`;
+  }
+
+  container.innerHTML = html;
+}
+
+function confirmClearShots(playerId) {
+  const p = state.players.find(p => p.id === playerId);
+  if (!p) return;
+  document.getElementById('confirmText').innerHTML =
+    `确定要清除 <strong>${escapeHtml(p.name)}</strong> 在本场次的所有投篮记录吗？`;
+  state.confirmCallback = () => {
+    if (state.shots[state.currentSession]) {
+      delete state.shots[state.currentSession][playerId];
+    }
+    saveData();
+    renderShots();
+    renderStats();
+    showToast('投篮记录已清除', 'success');
+  };
+  document.getElementById('confirmModal').classList.remove('hidden');
+}
+
+// ============================
+// Toast 提示
+// ============================
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast show ${type || ''}`;
+  setTimeout(() => { t.className = 'toast'; }, 2000);
+}
+
+// ============================
+// 工具函数
+// ============================
+function escapeHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// 键盘快捷键
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (state.addingMode) cancelPendingShots(false);
+    hideShotDeleteBtn();
+    closePlayerModal();
+    closeSessionModal();
+    closeConfirmModal();
+  }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && !e.target.closest('input')) {
+    if (selectedShotEl) deleteSelectedShot();
+  }
+  if (e.key === 'Enter' && !e.target.closest('input')) {
+    if (state.pendingShots.length > 0) confirmShots();
+  }
+});
+
+// ============================
+// 初始化
+// ============================
+loadData();
+render();
+</script>
+</body>
+</html>
