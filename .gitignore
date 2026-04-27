@@ -1,2 +1,5 @@
+# 本地数据文件
+basketball-tracker-data.json
+
+# 系统文件
 .workbuddy/
-deploy/
